@@ -1,157 +1,376 @@
 package com.meraj.liveai;
 
-import android.app.Activity;
+import android.accessibilityservice.AccessibilityService;
+import android.accessibilityservice.AccessibilityServiceInfo;
+import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Color;
+import android.graphics.PixelFormat;
 import android.net.Uri;
 import android.os.Bundle;
-import android.provider.Settings;
-import android.text.InputType;
+import android.os.Handler;
+import android.os.Looper;
+import android.speech.RecognitionListener;
+import android.speech.RecognizerIntent;
+import android.speech.SpeechRecognizer;
+import android.speech.tts.TextToSpeech;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
+import android.view.WindowManager;
+import android.view.accessibility.AccessibilityEvent;
+import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.Button;
-import android.widget.EditText;
-import android.widget.LinearLayout;
-import android.widget.ScrollView;
-import android.widget.TextView;
-import android.widget.Toast;
 
-public class MainActivity extends Activity {
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+public class AiAssistantService extends AccessibilityService {
+
+    private WindowManager windowManager;
+    private Button floatingBtn;
+    private TextToSpeech tts;
+    private SpeechRecognizer speechRecognizer;
+    private Handler mainHandler;
     private SharedPreferences prefs;
 
     @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        prefs = getSharedPreferences("AIPrefs", MODE_PRIVATE);
+    public void onAccessibilityEvent(AccessibilityEvent event) {}
 
-        ScrollView scrollView = new ScrollView(this);
-        LinearLayout layout = new LinearLayout(this);
-        layout.setOrientation(LinearLayout.VERTICAL);
-        layout.setPadding(40, 50, 40, 50);
-        layout.setBackgroundColor(Color.parseColor("#F8F9FA"));
+    @Override
+    public void onInterrupt() {}
 
-        TextView title = new TextView(this);
-        title.setText("⚡ Meraj Live AI Assistant");
-        title.setTextSize(22);
-        title.setTextColor(Color.parseColor("#1A73E8"));
-        title.setGravity(Gravity.CENTER);
-        title.setPadding(0, 0, 0, 25);
-        layout.addView(title);
+    @Override
+    protected void onServiceConnected() {
+        super.onServiceConnected();
+        AccessibilityServiceInfo info = new AccessibilityServiceInfo();
+        info.eventTypes = AccessibilityEvent.TYPES_ALL_MASK;
+        info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC;
+        info.flags = AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS |
+                     AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS |
+                     AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS;
+        setServiceInfo(info);
 
-        TextView nameLabel = new TextView(this);
-        nameLabel.setText("अपने AI असिस्टेंट का नाम:");
-        nameLabel.setPadding(0, 10, 0, 5);
-        layout.addView(nameLabel);
+        mainHandler = new Handler(Looper.getMainLooper());
+        prefs = getSharedPreferences("AIPrefs", Context.MODE_PRIVATE);
 
-        final EditText etName = new EditText(this);
-        etName.setText(prefs.getString("assistant_name", "Meraj AI"));
-        etName.setBackgroundColor(Color.WHITE);
-        etName.setPadding(25, 20, 25, 20);
-        layout.addView(etName);
+        initTTS();
+        createFloatingButton();
+    }
 
-        // API Key सुरक्षित बॉक्स कंटेनर
-        final LinearLayout keyContainer = new LinearLayout(this);
-        keyContainer.setOrientation(LinearLayout.VERTICAL);
-        keyContainer.setPadding(0, 20, 0, 10);
+    private void initTTS() {
+        tts = new TextToSpeech(this, status -> {
+            if (status == TextToSpeech.SUCCESS) {
+                tts.setLanguage(new Locale("hi", "IN"));
+            }
+        });
+    }
 
-        final TextView keyLabel = new TextView(this);
-        keyLabel.setText("Google Gemini API Key:");
-        keyLabel.setPadding(0, 0, 0, 5);
-        keyContainer.addView(keyLabel);
+    private void speak(String text) {
+        mainHandler.post(() -> {
+            if (tts != null) {
+                tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "LiveAiUtterance");
+            }
+        });
+    }
 
-        final EditText etKey = new EditText(this);
-        etKey.setHint("यहाँ अपनी API Key पेस्ट करें");
-        // पासवर्ड की तरह की को छुपाने के लिए
-        etKey.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        etKey.setBackgroundColor(Color.WHITE);
-        etKey.setPadding(25, 20, 25, 20);
-        keyContainer.addView(etKey);
+    private void createFloatingButton() {
+        windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
+        floatingBtn = new Button(this);
+        floatingBtn.setText("🎙️ MERAJ AI");
+        floatingBtn.setTextColor(Color.WHITE);
+        floatingBtn.setBackgroundColor(Color.parseColor("#1A73E8"));
+        floatingBtn.setPadding(25, 15, 25, 15);
 
-        layout.addView(keyContainer);
+        final WindowManager.LayoutParams params = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                PixelFormat.TRANSLUCENT
+        );
 
-        // की सुरक्षित होने पर दिखने वाला स्टेटस
-        final TextView savedStatus = new TextView(this);
-        savedStatus.setText("🔒 आपकी API Key सुरक्षित रूप से सेव और लॉक है।");
-        savedStatus.setTextColor(Color.parseColor("#137333"));
-        savedStatus.setTextSize(14);
-        savedStatus.setPadding(10, 15, 10, 15);
-        savedStatus.setVisibility(View.GONE);
-        layout.addView(savedStatus);
+        params.gravity = Gravity.TOP | Gravity.START;
+        params.x = 50;
+        params.y = 250;
 
-        final Button btnChangeKey = new Button(this);
-        btnChangeKey.setText("की बदलें (Change Key)");
-        btnChangeKey.setBackgroundColor(Color.parseColor("#5F6368"));
-        btnChangeKey.setTextColor(Color.WHITE);
-        btnChangeKey.setVisibility(View.GONE);
-        layout.addView(btnChangeKey);
+        floatingBtn.setOnTouchListener(new View.OnTouchListener() {
+            private int initialX, initialY;
+            private float touchX, touchY;
+            private boolean isClick = true;
 
-        final Button btnSave = new Button(this);
-        btnSave.setText("✔ सेटिंग सुरक्षित करें (SAVE)");
-        btnSave.setBackgroundColor(Color.parseColor("#1A73E8"));
-        btnSave.setTextColor(Color.WHITE);
-        layout.addView(btnSave);
-
-        // यदि की पहले से सेव है तो इनपुट बॉक्स को तुरंत छुपा दें
-        String existingKey = prefs.getString("user_gemini_key", "");
-        if (!existingKey.isEmpty()) {
-            keyContainer.setVisibility(View.GONE);
-            savedStatus.setVisibility(View.VISIBLE);
-            btnChangeKey.setVisibility(View.VISIBLE);
-            btnSave.setVisibility(View.GONE);
-        }
-
-        btnSave.setOnClickListener(v -> {
-            String keyInput = etKey.getText().toString().trim();
-            prefs.edit()
-                    .putString("assistant_name", etName.getText().toString().trim())
-                    .putString("user_gemini_key", keyInput)
-                    .apply();
-
-            Toast.makeText(this, "की सुरक्षित हो गई!", Toast.LENGTH_SHORT).show();
-
-            // की सेव होते ही इनपुट बॉक्स छुपाएं और लॉक दिखाएं
-            if (!keyInput.isEmpty()) {
-                keyContainer.setVisibility(View.GONE);
-                savedStatus.setVisibility(View.VISIBLE);
-                btnChangeKey.setVisibility(View.VISIBLE);
-                btnSave.setVisibility(View.GONE);
+            @Override
+            public boolean onTouch(View v, MotionEvent event) {
+                switch (event.getAction()) {
+                    case MotionEvent.ACTION_DOWN:
+                        initialX = params.x;
+                        initialY = params.y;
+                        touchX = event.getRawX();
+                        touchY = event.getRawY();
+                        isClick = true;
+                        return true;
+                    case MotionEvent.ACTION_MOVE:
+                        int dx = (int) (event.getRawX() - touchX);
+                        int dy = (int) (event.getRawY() - touchY);
+                        if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
+                            isClick = false;
+                        }
+                        params.x = initialX + dx;
+                        params.y = initialY + dy;
+                        windowManager.updateViewLayout(floatingBtn, params);
+                        return true;
+                    case MotionEvent.ACTION_UP:
+                        if (isClick) {
+                            startListening();
+                        }
+                        return true;
+                }
+                return false;
             }
         });
 
-        btnChangeKey.setOnClickListener(v -> {
-            keyContainer.setVisibility(View.VISIBLE);
-            savedStatus.setVisibility(View.GONE);
-            btnChangeKey.setVisibility(View.GONE);
-            btnSave.setVisibility(View.VISIBLE);
-            etKey.setText("");
-            etKey.requestFocus();
+        windowManager.addView(floatingBtn, params);
+    }
+
+    private void startListening() {
+        mainHandler.post(() -> {
+            if (speechRecognizer != null) {
+                speechRecognizer.destroy();
+            }
+            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
+            Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hi-IN");
+
+            speechRecognizer.setRecognitionListener(new RecognitionListener() {
+                @Override public void onReadyForSpeech(Bundle params) {
+                    floatingBtn.setText("🔴 सुन रहा हूँ...");
+                    floatingBtn.setBackgroundColor(Color.RED);
+                }
+                @Override public void onBeginningOfSpeech() {}
+                @Override public void onRmsChanged(float rmsdB) {}
+                @Override public void onBufferReceived(byte[] buffer) {}
+                @Override public void onEndOfSpeech() {
+                    floatingBtn.setText("⏳ सोच रहा हूँ...");
+                    floatingBtn.setBackgroundColor(Color.parseColor("#E37400"));
+                }
+                @Override public void onError(int error) {
+                    resetButton();
+                }
+                @Override public void onResults(Bundle results) {
+                    resetButton();
+                    ArrayList<String> matches = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                    if (matches != null && !matches.isEmpty()) {
+                        processVoiceCommand(matches.get(0));
+                    }
+                }
+                @Override public void onPartialResults(Bundle partialResults) {}
+                @Override public void onEvent(int eventType, Bundle params) {}
+            });
+
+            speechRecognizer.startListening(intent);
         });
+    }
 
-        TextView permLabel = new TextView(this);
-        permLabel.setText("\nज़रूरी परमिशन चालू करें:");
-        permLabel.setPadding(0, 20, 0, 5);
-        layout.addView(permLabel);
-
-        Button btnOverlay = new Button(this);
-        btnOverlay.setText("1. स्क्रीन पर तैरने वाला बटन ALLOW करें");
-        btnOverlay.setOnClickListener(v -> {
-            Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:" + getPackageName()));
-            startActivity(intent);
+    private void resetButton() {
+        mainHandler.post(() -> {
+            if (floatingBtn != null) {
+                floatingBtn.setText("🎙️ MERAJ AI");
+                floatingBtn.setBackgroundColor(Color.parseColor("#1A73E8"));
+            }
         });
-        layout.addView(btnOverlay);
+    }
 
-        Button btnAccessibility = new Button(this);
-        btnAccessibility.setText("2. ऑटो-क्लिक व सर्विस चालू करें");
-        btnAccessibility.setOnClickListener(v -> {
-            Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
-            startActivity(intent);
-        });
-        layout.addView(btnAccessibility);
+    private void processVoiceCommand(String query) {
+        String lower = query.toLowerCase();
 
-        scrollView.addView(layout);
-        setContentView(scrollView);
+        // 1. ऑटो क्लिक कमांड (जैसे: "क्लिक करो नेक्स्ट" या "सर्च पर क्लिक करो")
+        if (lower.startsWith("क्लिक करो") || lower.startsWith("दबाओ") || lower.contains("पर क्लिक करो")) {
+            String target = query.replace("क्लिक करो", "").replace("दबाओ", "").replace("पर", "").trim();
+            if (performClickOnText(target)) {
+                speak(target + " पर क्लिक कर दिया");
+                return;
+            }
+        }
+
+        // 2. डायरेक्ट यूट्यूब कमांड
+        if (lower.contains("यूट्यूब") || lower.contains("youtube") || lower.contains("गाना")) {
+            speak("यूट्यूब पर चला रहा हूँ");
+            String search = query.replace("यूट्यूब", "").replace("पर", "").replace("चलाओ", "").replace("सर्च करो", "").trim();
+            Intent intent = new Intent(Intent.ACTION_SEARCH);
+            intent.setPackage("com.google.android.youtube");
+            intent.putExtra("query", search);
+            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            try {
+                startActivity(intent);
+            } catch (Exception e) {
+                Intent webIntent = new Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/results?search_query=" + Uri.encode(search)));
+                webIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(webIntent);
+            }
+            return;
+        }
+
+        // 3. डायरेक्ट व्हाट्सएप कमांड
+        if (lower.contains("व्हाट्सएप") || lower.contains("whatsapp")) {
+            speak("व्हाट्सएप खोल रहा हूँ");
+            Intent launchIntent = getPackageManager().getLaunchIntentForPackage("com.whatsapp");
+            if (launchIntent != null) {
+                launchIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(launchIntent);
+            }
+            return;
+        }
+
+        // 4. लाइव स्क्रीन का विवरण और जेमिनी सवाल
+        String screenContext = extractScreenContext();
+        askGemini(query, screenContext);
+    }
+
+    private boolean performClickOnText(String targetText) {
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root == null || targetText.isEmpty()) return false;
+
+        List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByText(targetText);
+        if (nodes != null && !nodes.isEmpty()) {
+            for (AccessibilityNodeInfo node : nodes) {
+                if (node.isClickable()) {
+                    return node.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                }
+                AccessibilityNodeInfo parent = node.getParent();
+                while (parent != null) {
+                    if (parent.isClickable()) {
+                        return parent.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                    }
+                    parent = parent.getParent();
+                }
+            }
+        }
+        return false;
+    }
+
+    private String extractScreenContext() {
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root == null) return "स्क्रीन खाली है या होम स्क्रीन पर हैं।";
+
+        StringBuilder sb = new StringBuilder();
+        if (root.getPackageName() != null) {
+            sb.append("वर्तमान ऐप: ").append(root.getPackageName().toString()).append("\nस्क्रीन टेक्स्ट: ");
+        }
+        traverseNode(root, sb);
+        return sb.toString();
+    }
+
+    private void traverseNode(AccessibilityNodeInfo node, StringBuilder sb) {
+        if (node == null) return;
+        if (node.getText() != null && node.getText().length() > 0) {
+            sb.append(node.getText().toString()).append(" | ");
+        }
+        if (node.getContentDescription() != null && node.getContentDescription().length() > 0) {
+            sb.append(node.getContentDescription().toString()).append(" | ");
+        }
+        for (int i = 0; i < node.getChildCount(); i++) {
+            traverseNode(node.getChild(i), sb);
+        }
+    }
+
+    private void askGemini(String userQuery, String screenContext) {
+        String apiKey = prefs.getString("user_gemini_key", "").trim();
+
+        if (apiKey.isEmpty()) {
+            speak("कृपया पहले ऐप खोलकर अपनी Gemini API Key सेव करें।");
+            return;
+        }
+
+        new Thread(() -> {
+            try {
+                String prompt = "यूजर का सवाल: " + userQuery +
+                        "\n\nयूजर के मोबाइल स्क्रीन पर वर्तमान में खुला विवरण:\n" + screenContext +
+                        "\n\nनिर्देश: यूजर को हिंदी में 1-2 पंक्तियों में सटीक, दोस्ताना और सीधा उत्तर दें। यदि यूजर पूछे कि 'मैं कहाँ हूँ', तो वर्तमान ऐप और स्क्रीन का नाम बताएं।";
+
+                String urlString = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" + apiKey;
+                URL url = new URL(urlString);
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("POST");
+                conn.setRequestProperty("Content-Type", "application/json");
+                conn.setRequestProperty("x-goog-api-key", apiKey);
+                if (apiKey.startsWith("AQ.")) {
+                    conn.setRequestProperty("Authorization", "Bearer " + apiKey);
+                }
+
+                conn.setDoOutput(true);
+                conn.setConnectTimeout(15000);
+                conn.setReadTimeout(15000);
+
+                JSONObject textPart = new JSONObject();
+                textPart.put("text", prompt);
+
+                JSONArray parts = new JSONArray();
+                parts.put(textPart);
+
+                JSONObject content = new JSONObject();
+                content.put("parts", parts);
+
+                JSONArray contents = new JSONArray();
+                contents.put(content);
+
+                JSONObject body = new JSONObject();
+                body.put("contents", contents);
+
+                OutputStream os = conn.getOutputStream();
+                os.write(body.toString().getBytes("UTF-8"));
+                os.close();
+
+                int responseCode = conn.getResponseCode();
+
+                if (responseCode == 200) {
+                    BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+                    StringBuilder res = new StringBuilder();
+                    String line;
+                    while ((line = br.readLine()) != null) res.append(line);
+                    br.close();
+
+                    JSONObject jsonResponse = new JSONObject(res.toString());
+                    String reply = jsonResponse.getJSONArray("candidates")
+                            .getJSONObject(0)
+                            .getJSONObject("content")
+                            .getJSONArray("parts")
+                            .getJSONObject(0)
+                            .getString("text");
+
+                    speak(reply.trim());
+                } else {
+                    speak("गूगल सर्वर एरर कोड " + responseCode + " आया है। कृपया अपनी की जांचें।");
+                }
+            } catch (Exception e) {
+                speak("माफ़ कीजिये, नेटवर्क कनेक्शन में समस्या आ रही है।");
+            }
+        }).start();
+    }
+
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        if (floatingBtn != null && windowManager != null) {
+            windowManager.removeView(floatingBtn);
+        }
+        if (tts != null) {
+            tts.stop();
+            tts.shutdown();
+        }
+        if (speechRecognizer != null) {
+            speechRecognizer.destroy();
+        }
     }
 }
