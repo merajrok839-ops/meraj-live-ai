@@ -11,6 +11,7 @@ import android.view.Gravity;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -21,73 +22,78 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-
         prefs = getSharedPreferences("AiPrefs", MODE_PRIVATE);
 
+        ScrollView scrollView = new ScrollView(this);
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
-        layout.setPadding(50, 70, 50, 50);
+        layout.setPadding(40, 50, 40, 40);
         layout.setBackgroundColor(Color.parseColor("#F4F6F9"));
 
         TextView title = new TextView(this);
-        title.setText("⚡ Meraj Live AI Setup");
+        title.setText("⚡ Meraj Live AI Assistant");
         title.setTextSize(22);
         title.setTextColor(Color.parseColor("#1A73E8"));
         title.setGravity(Gravity.CENTER);
-        title.setPadding(0, 0, 0, 30);
+        title.setPadding(0, 0, 0, 25);
         layout.addView(title);
 
-        // 1. असिस्टेंट का नाम रखने वाला बॉक्स
-        TextView label = new TextView(this);
-        label.setText("अपने AI असिस्टेंट का नाम रखें:");
-        label.setTextSize(16);
-        label.setTextColor(Color.BLACK);
-        layout.addView(label);
+        TextView nameLabel = new TextView(this);
+        nameLabel.setText("अपने AI असिस्टेंट का नाम रखें:");
+        nameLabel.setPadding(0, 10, 0, 5);
+        layout.addView(nameLabel);
 
         final EditText etName = new EditText(this);
-        String savedName = prefs.getString("assistant_name", "Meraj AI");
-        etName.setText(savedName);
+        etName.setHint("उदा. Meraj AI");
+        etName.setText(prefs.getString("assistant_name", "Meraj AI"));
         etName.setBackgroundColor(Color.WHITE);
         etName.setPadding(25, 25, 25, 25);
         layout.addView(etName);
 
-        Button btnSaveName = new Button(this);
-        btnSaveName.setText("नाम सुरक्षित करें (Save Name)");
-        btnSaveName.setBackgroundColor(Color.parseColor("#1A73E8"));
-        btnSaveName.setTextColor(Color.WHITE);
-        btnSaveName.setOnClickListener(v -> {
-            String name = etName.getText().toString().trim();
-            if (!name.isEmpty()) {
-                prefs.edit().putString("assistant_name", name).apply();
-                Toast.makeText(this, "असिस्टेंट का नाम सेट हुआ: " + name, Toast.LENGTH_SHORT).show();
-            }
+        TextView keyLabel = new TextView(this);
+        keyLabel.setText("\nGoogle Gemini API Key (3 फ्री ट्रायल के बाद):");
+        keyLabel.setPadding(0, 10, 0, 5);
+        layout.addView(keyLabel);
+
+        final EditText etKey = new EditText(this);
+        etKey.setHint("अपनी Gemini API Key यहाँ डालें");
+        etKey.setText(prefs.getString("user_gemini_key", ""));
+        etKey.setBackgroundColor(Color.WHITE);
+        etKey.setPadding(25, 25, 25, 25);
+        layout.addView(etKey);
+
+        Button btnSave = new Button(this);
+        btnSave.setText("✔ सेटिंग सुरक्षित करें (Save)");
+        btnSave.setBackgroundColor(Color.parseColor("#1A73E8"));
+        btnSave.setTextColor(Color.WHITE);
+        btnSave.setOnClickListener(v -> {
+            prefs.edit()
+                .putString("assistant_name", etName.getText().toString().trim())
+                .putString("user_gemini_key", etKey.getText().toString().trim())
+                .apply();
+            Toast.makeText(this, "सेटिंग सुरक्षित हो गई!", Toast.LENGTH_SHORT).show();
         });
-        layout.addView(btnSaveName);
+        layout.addView(btnSave);
 
-        TextView spacer = new TextView(this);
-        spacer.setPadding(0, 30, 0, 0);
-        layout.addView(spacer);
+        TextView permLabel = new TextView(this);
+        permLabel.setText("\nजरूरी परमिशन चालू करें:");
+        permLabel.setPadding(0, 15, 0, 5);
+        layout.addView(permLabel);
 
-        // 2. फ्लोटिंग बटन परमिशन
         Button btnOverlay = new Button(this);
-        btnOverlay.setText("1. स्क्रीन पर तैरने की अनुमति (Floating Button)");
-        btnOverlay.setOnClickListener(v -> {
-            Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:" + getPackageName()));
-            startActivity(intent);
-        });
+        btnOverlay.setText("1. स्क्रीन पर तैरने वाला बटन Allow करें");
+        btnOverlay.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()))));
         layout.addView(btnOverlay);
 
-        // 3. ऑटो-क्लिक परमिशन
-        Button btnAccessibility = new Button(this);
-        btnAccessibility.setText("2. ऑटो-क्लिक और ऐप्स कंट्रोल अनुमति (Accessibility)");
-        btnAccessibility.setOnClickListener(v -> {
-            Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
-            startActivity(intent);
-            Toast.makeText(this, "लिस्ट में 'Meraj Live AI' ढूंढकर चालू करें", Toast.LENGTH_LONG).show();
+        Button btnAccess = new Button(this);
+        btnAccess.setText("2. ऑटो-क्लिक व सर्विस चालू करें");
+        btnAccess.setOnClickListener(v -> {
+            startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
+            Toast.makeText(this, "डाउनलोड ऐप्स में 'Meraj Live AI' ऑन करें", Toast.LENGTH_LONG).show();
         });
-        layout.addView(btnAccessibility);
+        layout.addView(btnAccess);
 
-        setContentView(layout);
+        scrollView.addView(layout);
+        setContentView(scrollView);
     }
 }
