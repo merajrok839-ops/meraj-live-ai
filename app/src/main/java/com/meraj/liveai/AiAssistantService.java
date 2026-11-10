@@ -195,7 +195,7 @@ public class AiAssistantService extends AccessibilityService {
     private void processVoiceCommand(String query) {
         String lower = query.toLowerCase();
 
-        // 1. ऑटो क्लिक कमांड (जैसे: "क्लिक करो नेक्स्ट" या "सर्च पर क्लिक करो")
+        // 1. ऑटो क्लिक
         if (lower.startsWith("क्लिक करो") || lower.startsWith("दबाओ") || lower.contains("पर क्लिक करो")) {
             String target = query.replace("क्लिक करो", "").replace("दबाओ", "").replace("पर", "").trim();
             if (performClickOnText(target)) {
@@ -204,7 +204,7 @@ public class AiAssistantService extends AccessibilityService {
             }
         }
 
-        // 2. डायरेक्ट यूट्यूब कमांड
+        // 2. यूट्यूब
         if (lower.contains("यूट्यूब") || lower.contains("youtube") || lower.contains("गाना")) {
             speak("यूट्यूब पर चला रहा हूँ");
             String search = query.replace("यूट्यूब", "").replace("पर", "").replace("चलाओ", "").replace("सर्च करो", "").trim();
@@ -222,7 +222,7 @@ public class AiAssistantService extends AccessibilityService {
             return;
         }
 
-        // 3. डायरेक्ट व्हाट्सएप कमांड
+        // 3. व्हाट्सएप
         if (lower.contains("व्हाट्सएप") || lower.contains("whatsapp")) {
             speak("व्हाट्सएप खोल रहा हूँ");
             Intent launchIntent = getPackageManager().getLaunchIntentForPackage("com.whatsapp");
@@ -233,7 +233,7 @@ public class AiAssistantService extends AccessibilityService {
             return;
         }
 
-        // 4. लाइव स्क्रीन का विवरण और जेमिनी सवाल
+        // 4. लाइव स्क्रीन संदर्भ और जेमिनी सवाल
         String screenContext = extractScreenContext();
         askGemini(query, screenContext);
     }
@@ -269,11 +269,15 @@ public class AiAssistantService extends AccessibilityService {
             sb.append("वर्तमान ऐप: ").append(root.getPackageName().toString()).append("\nस्क्रीन टेक्स्ट: ");
         }
         traverseNode(root, sb);
-        return sb.toString();
+        String result = sb.toString();
+        if (result.length() > 1500) {
+            result = result.substring(0, 1500);
+        }
+        return result;
     }
 
     private void traverseNode(AccessibilityNodeInfo node, StringBuilder sb) {
-        if (node == null) return;
+        if (node == null || sb.length() > 1500) return;
         if (node.getText() != null && node.getText().length() > 0) {
             sb.append(node.getText().toString()).append(" | ");
         }
@@ -299,14 +303,26 @@ public class AiAssistantService extends AccessibilityService {
                         "\n\nयूजर के मोबाइल स्क्रीन पर वर्तमान में खुला विवरण:\n" + screenContext +
                         "\n\nनिर्देश: यूजर को हिंदी में 1-2 पंक्तियों में सटीक, दोस्ताना और सीधा उत्तर दें। यदि यूजर पूछे कि 'मैं कहाँ हूँ', तो वर्तमान ऐप और स्क्रीन का नाम बताएं।";
 
-                String urlString = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" + apiKey;
+                boolean isAuthKey = apiKey.startsWith("AQ.");
+                String urlString;
+
+                // AQ. Auth key के लिए URL में कभी ?key= नहीं जोड़ना है
+                if (isAuthKey) {
+                    urlString = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent";
+                } else {
+                    urlString = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" + apiKey;
+                }
+
                 URL url = new URL(urlString);
                 HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("POST");
-                conn.setRequestProperty("Content-Type", "application/json");
-                conn.setRequestProperty("x-goog-api-key", apiKey);
-                if (apiKey.startsWith("AQ.")) {
+                conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+
+                // AQ. key के लिए केवल Authorization Header जाएगा
+                if (isAuthKey) {
                     conn.setRequestProperty("Authorization", "Bearer " + apiKey);
+                } else {
+                    conn.setRequestProperty("x-goog-api-key", apiKey);
                 }
 
                 conn.setDoOutput(true);
@@ -328,8 +344,12 @@ public class AiAssistantService extends AccessibilityService {
                 JSONObject body = new JSONObject();
                 body.put("contents", contents);
 
+                byte[] postBytes = body.toString().getBytes("UTF-8");
+                conn.setFixedLengthStreamingMode(postBytes.length);
+
                 OutputStream os = conn.getOutputStream();
-                os.write(body.toString().getBytes("UTF-8"));
+                os.write(postBytes);
+                os.flush();
                 os.close();
 
                 int responseCode = conn.getResponseCode();
